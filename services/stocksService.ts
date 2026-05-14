@@ -1,8 +1,29 @@
-import Constants from "expo-constants";
-
-const TWELVE_DATA_KEY: string =
-  Constants.expoConfig?.extra?.twelveDataKey ?? "";
+const TWELVE_DATA_KEY = process.env.EXPO_PUBLIC_TWELVE_DATA_KEY ?? "";
 const BASE_URL = "https://api.twelvedata.com";
+
+export const GLOBAL_STOCKS = [
+  "AAPL", "MSFT", "GOOGL", "AMZN",
+  "TSLA", "META", "NVDA", "JPM",
+];
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export async function getStocksSequential(
+  symbols: string[],
+  delayMs = 200
+): Promise<StockQuote[]> {
+  const results: StockQuote[] = [];
+  for (let i = 0; i < symbols.length; i++) {
+    if (i > 0) await sleep(delayMs);
+    try {
+      const quote = await getStockQuote(symbols[i]);
+      results.push(quote);
+    } catch {
+      // símbolo no disponible — continúa con el siguiente
+    }
+  }
+  return results;
+}
 
 export interface StockQuote {
   symbol: string;
