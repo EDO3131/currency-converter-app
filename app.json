@@ -44,10 +44,6 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "extra": {
-      "supabaseUrl": "https://cfadmznjhaqfmzpagtru.supabase.co",
-      "supabaseAnonKey": "REPLACE_WITH_YOUR_SUPABASE_ANON_KEY",
-      "twelveDataKey": "REPLACE_WITH_YOUR_TWELVE_DATA_KEY"
-    }
+    "extra": {}
   }
 }

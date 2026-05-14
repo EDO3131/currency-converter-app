@@ -17,6 +17,8 @@ import {
 } from "react-native";
 import { fetchExchangeRates } from "@/services/api";
 import { getCountryByCurrency, Country } from "@/services/countriesService";
+import StocksModal from "@/components/StocksModal";
+import StocksTicker from "@/components/StocksTicker";
 
 type Continent = "América" | "Europa" | "Asia" | "África" | "Oceanía";
 type PickerTarget = "from" | "to" | null;
@@ -27,6 +29,18 @@ interface CurrencyInfo {
   flag: string;
   country: string;
   capital: string;
+}
+
+interface ConversionRecord {
+  fromAmount: string;
+  fromFlag: string;
+  fromCode: string;
+  fromSymbol: string;
+  toAmount: string;
+  toFlag: string;
+  toCode: string;
+  toSymbol: string;
+  time: string;
 }
 
 const CURRENCIES: Record<Continent, CurrencyInfo[]> = {
@@ -316,8 +330,19 @@ const CONTINENTS: Continent[] = [
   "Oceanía",
 ];
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",   CAD: "CA$", MXN: "$",   BRL: "R$",  ARS: "$",   CLP: "$",
+  COP: "$",   PEN: "S/",  EUR: "€",   GBP: "£",   CHF: "Fr",  NOK: "kr",
+  SEK: "kr",  DKK: "kr",  PLN: "zł",  CZK: "Kč",  HUF: "Ft",  RON: "lei",
+  JPY: "¥",   CNY: "¥",   INR: "₹",   KRW: "₩",   SGD: "S$",  HKD: "HK$",
+  THB: "฿",   MYR: "RM",  IDR: "Rp",  PHP: "₱",   ZAR: "R",   EGP: "£",
+  NGN: "₦",   KES: "KSh", MAD: "د.م.",GHS: "₵",   AUD: "A$",  NZD: "NZ$",
+  FJD: "FJ$", PGK: "K",
+};
+
 export default function Index() {
-  const [continent, setContinent] = useState<Continent>("América");
+  const [fromContinent, setFromContinent] = useState<Continent>("América");
+  const [toContinent, setToContinent] = useState<Continent>("Europa");
   const [fromCurrency, setFromCurrency] = useState<CurrencyInfo>(
     CURRENCIES.América[0]
   );
@@ -331,6 +356,40 @@ export default function Index() {
   const [error, setError] = useState<string | null>(null);
   const [activePicker, setActivePicker] = useState<PickerTarget>(null);
   const [dbCountry, setDbCountry] = useState<Country | null>(null);
+  const [history, setHistory] = useState<ConversionRecord[]>([]);
+  const [stocksVisible, setStocksVisible] = useState(false);
+
+  const buildRecord = useCallback(
+    (freshRates: Record<string, number>): ConversionRecord | null => {
+      const num = parseFloat(amount);
+      const rate = freshRates[toCurrency.code];
+      if (isNaN(num) || num < 0 || !rate) return null;
+      const fmt = (n: number) =>
+        n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      const time = new Date().toLocaleTimeString("es-ES", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return {
+        fromAmount: fmt(num),
+        fromFlag: fromCurrency.flag,
+        fromCode: fromCurrency.code,
+        fromSymbol: CURRENCY_SYMBOLS[fromCurrency.code] ?? fromCurrency.code,
+        toAmount: fmt(num * rate),
+        toFlag: toCurrency.flag,
+        toCode: toCurrency.code,
+        toSymbol: CURRENCY_SYMBOLS[toCurrency.code] ?? toCurrency.code,
+        time,
+      };
+    },
+    [amount, fromCurrency, toCurrency]
+  );
+
+  const pushToHistory = useCallback(
+    (record: ConversionRecord) =>
+      setHistory((prev) => [record, ...prev].slice(0, 5)),
+    []
+  );
 
   const loadRates = useCallback(async () => {
     setLoading(true);
@@ -339,12 +398,14 @@ export default function Index() {
       const data = await fetchExchangeRates(fromCurrency.code);
       setRates(data.rates);
       setRatesDate(data.date);
+      const record = buildRecord(data.rates);
+      if (record) pushToHistory(record);
     } catch {
       setError("No se pudieron cargar las tasas. Verifica tu conexión.");
     } finally {
       setLoading(false);
     }
-  }, [fromCurrency.code]);
+  }, [fromCurrency.code, buildRecord, pushToHistory]);
 
   useEffect(() => {
     loadRates();
@@ -355,13 +416,6 @@ export default function Index() {
       .then(setDbCountry)
       .catch(() => setDbCountry(null));
   }, [fromCurrency.code]);
-
-  const handleContinentChange = (next: Continent) => {
-    const list = CURRENCIES[next];
-    setContinent(next);
-    setFromCurrency(list[0]);
-    setToCurrency(list[1] ?? list[0]);
-  };
 
   const handlePickerSelect = (currency: CurrencyInfo) => {
     if (activePicker === "from") setFromCurrency(currency);
@@ -385,6 +439,11 @@ export default function Index() {
     });
   };
 
+  const handleAmountSubmit = () => {
+    const record = buildRecord(rates);
+    if (record) pushToHistory(record);
+  };
+
   const getRate = (): string => {
     const rate = rates[toCurrency.code];
     if (!rate) return "—";
@@ -393,8 +452,6 @@ export default function Index() {
       maximumFractionDigits: 4,
     });
   };
-
-  const currentCurrencies = CURRENCIES[continent];
 
   const renderCurrencyItem: ListRenderItem<CurrencyInfo> = ({ item }) => (
     <TouchableOpacity
@@ -428,36 +485,7 @@ export default function Index() {
               <Text style={styles.headerSubtitle}>Tasas al {ratesDate}</Text>
             ) : null}
           </View>
-
-          {/* ── Selector de continente ── */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Continente</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.continentScroll}
-            >
-              {CONTINENTS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[
-                    styles.continentChip,
-                    continent === c && styles.continentChipActive,
-                  ]}
-                  onPress={() => handleContinentChange(c)}
-                >
-                  <Text
-                    style={[
-                      styles.continentChipText,
-                      continent === c && styles.continentChipTextActive,
-                    ]}
-                  >
-                    {c}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+          <StocksTicker />
 
           {/* ── Tarjeta convertidor ── */}
           <View style={styles.card}>
@@ -487,6 +515,7 @@ export default function Index() {
                 style={styles.amountInput}
                 value={amount}
                 onChangeText={setAmount}
+                onEndEditing={handleAmountSubmit}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor="#9CA3AF"
@@ -549,6 +578,32 @@ export default function Index() {
             )}
           </TouchableOpacity>
 
+          {/* ── Historial ── */}
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Conversiones recientes</Text>
+            {history.length === 0 ? (
+              <Text style={styles.historyEmpty}>Sin conversiones recientes</Text>
+            ) : (
+              history.map((rec, i) => (
+                <View
+                  key={i}
+                  style={[styles.historyRow, i < history.length - 1 && styles.historyRowBorder]}
+                >
+                  <View style={styles.historyMain}>
+                    <Text style={styles.historyFrom}>
+                      {rec.fromFlag}{"  "}{rec.fromSymbol}{rec.fromAmount} {rec.fromCode}
+                    </Text>
+                    <Text style={styles.historyArrow}>→</Text>
+                    <Text style={styles.historyTo}>
+                      {rec.toFlag}{"  "}{rec.toSymbol}{rec.toAmount} {rec.toCode}
+                    </Text>
+                  </View>
+                  <Text style={styles.historyTime}>{rec.time}</Text>
+                </View>
+              ))
+            )}
+          </View>
+
           {/* ── Error ── */}
           {error ? (
             <View style={styles.errorContainer}>
@@ -582,9 +637,23 @@ export default function Index() {
                 ) : null}
               </View>
             </View>
+            <TouchableOpacity
+              style={styles.marketButton}
+              onPress={() => setStocksVisible(true)}
+            >
+              <Text style={styles.marketButtonText}>📈  Ver mercado</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <StocksModal
+        visible={stocksVisible}
+        onClose={() => setStocksVisible(false)}
+        currencyCode={fromCurrency.code}
+        flag={fromCurrency.flag}
+        countryName={dbCountry?.name ?? fromCurrency.country}
+      />
 
       {/* ── Modal selector de moneda ── */}
       <Modal
@@ -605,8 +674,48 @@ export default function Index() {
                 <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
             </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.modalContinentScroll}
+              contentContainerStyle={styles.modalContinentContent}
+            >
+              {CONTINENTS.map((c) => {
+                const active =
+                  activePicker === "from"
+                    ? fromContinent === c
+                    : toContinent === c;
+                return (
+                  <TouchableOpacity
+                    key={c}
+                    style={[
+                      styles.continentChip,
+                      active && styles.continentChipActive,
+                    ]}
+                    onPress={() =>
+                      activePicker === "from"
+                        ? setFromContinent(c)
+                        : setToContinent(c)
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.continentChipText,
+                        active && styles.continentChipTextActive,
+                      ]}
+                    >
+                      {c}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
             <FlatList
-              data={currentCurrencies}
+              data={
+                CURRENCIES[
+                  activePicker === "from" ? fromContinent : toContinent
+                ]
+              }
               keyExtractor={(item) => item.code}
               renderItem={renderCurrencyItem}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -666,20 +775,23 @@ const styles = StyleSheet.create({
   // Chips de continente
   continentScroll: { flexDirection: "row" },
   continentChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 8,
+    minHeight: 36,
     borderRadius: 20,
     backgroundColor: "#FFFFFF",
     marginRight: 8,
     borderWidth: 1.5,
     borderColor: "#E5E7EB",
+    justifyContent: "center",
   },
   continentChipActive: {
     backgroundColor: "#4F46E5",
     borderColor: "#4F46E5",
   },
   continentChipText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
     color: "#374151",
   },
@@ -844,6 +956,67 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  // Historial
+  historyEmpty: {
+    fontSize: 14,
+    color: "#9CA3AF",
+    textAlign: "center",
+    paddingVertical: 16,
+  },
+  historyRow: {
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  historyRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  historyMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  historyFrom: {
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "500",
+  },
+  historyArrow: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    marginHorizontal: 4,
+  },
+  historyTo: {
+    fontSize: 13,
+    color: "#4F46E5",
+    fontWeight: "600",
+  },
+  historyTime: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginLeft: 8,
+  },
+
+  // Botón mercado
+  marketButton: {
+    marginTop: 16,
+    backgroundColor: "#EEF2FF",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#C7D2FE",
+  },
+  marketButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#4F46E5",
+  },
+
   // Card país
   countryInfo: {
     flexDirection: "row",
@@ -894,6 +1067,15 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: "#9CA3AF",
     paddingHorizontal: 4,
+  },
+  modalContinentScroll: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  modalContinentContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
   },
   currencyItem: {
     flexDirection: "row",
